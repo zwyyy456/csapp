@@ -9,6 +9,10 @@ e.g. write 0x00007fd357a02ae0 to cache, the memory lapping should be:
     e0 2a a0 57 d3 7f 00 00
 */
 
+extern core_t cores[NUM_CORES];
+extern uint64_t ACTIVE_CORE;
+extern uint8_t pm[PHYSICAL_MEMORY_SPACE];
+
 // memory accessing used in instructions
 uint64_t read64bits_dram(uint64_t paddr, core_t *cr) {
     if (DEBUG_ENABLE_SRAM_CACHE == 1) {

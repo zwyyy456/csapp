@@ -6,6 +6,9 @@
 #include "memory.h"
 #include "common.h"
 
+extern core_t cores[NUM_CORES];
+extern uint64_t ACTIVE_CORE;
+extern uint8_t pm[PHYSICAL_MEMORY_SPACE];
 uint64_t va2pa(uint64_t vaddr, core_t *cr) {
-    return vaddr & (0xffffffffffffffff >> (64 - MAX_INDEX_PHYSICAL_PAGE));
+    return vaddr % PHYSICAL_MEMORY_SPACE;
 }

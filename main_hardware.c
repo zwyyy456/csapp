@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include "cpu.h"
@@ -5,18 +6,28 @@
 #include "common.h"
 
 #define MAX_NUM_INSTRUCTION_CYCLE 100
-
+core_t cores[NUM_CORES];
+uint64_t ACTIVE_CORE;
+uint8_t pm[PHYSICAL_MEMORY_SPACE];
 static void TestAddFunctionCallAndComputation();
+static void TestString2Uint();
 
 // symbols from isa and sram
 void print_register(core_t *cr);
 void print_stack(core_t *cr);
 
 int main() {
-    TestAddFunctionCallAndComputation();
+    // TestAddFunctionCallAndComputation();
+    TestString2Uint();
     return 0;
 }
 
+static void TestString2Uint() {
+    const char *nums[12] = {"0", "-0", "0x0", "1234", "0x1234", "0xabcd", "-0x1", "-0x1234", "42", "-42", "0xffffffff", "-0xfffff"};
+    for (int i = 0; i < 12; ++i) {
+        printf("%s -> %lx\n", nums[i], string2uint(nums[i]));
+    }
+}
 static void TestAddFunctionCallAndComputation() {
     ACTIVE_CORE = 0x0;
 
