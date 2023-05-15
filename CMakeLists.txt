@@ -9,10 +9,10 @@ enable_testing()
 
 include_directories(inc) # 添加头文件文件夹 inc
 
-file(GLOB SOURCES "*/*.c")
+file(GLOB SOURCES "src/**/.c")
 
 # 将这些源文件编译成一个函数
-add_executable(asms main.c ${SOURCES})
+add_executable(asms main_hardware.c ${SOURCES})
 
 # target_link_libraries(asms Threads::Threads)
 
