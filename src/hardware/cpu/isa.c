@@ -1,6 +1,8 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include "cpu.h"
 #include "memory.h"
 #include "common.h"
@@ -50,6 +52,82 @@ typedef struct OPERAND_STRUCT {
     uint64_t reg2;  // register 2
 } od_t;
 
+// lookup table
+static const char *reg_name_list[72] = {
+    "%rax",
+    "%eax",
+    "%ax",
+    "%ah",
+    "%al",
+    "%rbx",
+    "%ebx",
+    "%bx",
+    "%bh",
+    "%bl",
+    "%rcx",
+    "%ecx",
+    "%cx",
+    "%ch",
+    "%cl",
+    "%rdx",
+    "%edx",
+    "%dx",
+    "%dh",
+    "%dl",
+    "%rsi",
+    "%esi",
+    "%si",
+    "%sih",
+    "%sil",
+    "%rdi",
+    "%edi",
+    "%di",
+    "%dih",
+    "%dil",
+    "%rbp",
+    "%ebp",
+    "%bp",
+    "%bph",
+    "%bpl",
+    "%rsp",
+    "%esp",
+    "%sp",
+    "%sph",
+    "%spl",
+    "%r8",
+    "%r8d",
+    "%r8w",
+    "%r8b",
+    "%r9",
+    "%r9d",
+    "%r9w",
+    "%r9b",
+    "%r10",
+    "%r10d",
+    "%r10w",
+    "%r10b",
+    "%r11",
+    "%r11d",
+    "%r11w",
+    "%r11b",
+    "%r12",
+    "%r12d",
+    "%r12w",
+    "%r12b",
+    "%r13",
+    "%r13d",
+    "%r13w",
+    "%r13b",
+    "%r14",
+    "%r14d",
+    "%r14w",
+    "%r14b",
+    "%r15",
+    "%r15d",
+    "%r15w",
+    "%r15b",
+};
+
 // local variables are allocated in stack in run-time
 // we don't consider local STATIC variables
 // ref: Computer Systems: A Programmer's Perspective 3rd
@@ -68,6 +146,7 @@ typedef struct INST_STRUCT {
 static void parse_instruction(const char *str, inst_t *inst, core_t *cr);
 static void parse_operand(const char *str, od_t *od, core_t *cr);
 static uint64_t decode_operand(od_t *od);
+static uint64_t reflect_register(const char *str, core_t *cr);
 
 // interpret the operand
 static uint64_t decode_operand(od_t *od) {
@@ -110,6 +189,74 @@ static uint64_t decode_operand(od_t *od) {
 }
 
 static void parse_instruction(const char *str, inst_t *inst, core_t *cr) {
+    char op_str[64] = {0};
+    int op_len = 0;
+    char src_str[64] = {0};
+    char src_len = 0;
+    char dst_str[64] = {0};
+    int dst_len = 0;
+
+    char c = 0;
+    int cnt_pa = 0; // 括号的数量
+    int state = 0;
+
+    for (int i = 0; i < strlen(str); ++i) {
+        c = str[i];
+        if (c == '(' || c == ')') {
+            ++cnt_pa;
+        }
+        if (state == 0 && c != ' ') {
+            state = 1; // 离开状态 0
+        } else if (state == 1 && c == ' ') {
+            state = 2;
+        } else if (state == 2 && c != ' ') {
+            state = 3;
+        } else if (state == 3 && c == ',' && ((cnt_pa == 0) || (cnt_pa == 2))) {
+            state = 4;
+        } else if (state == 4 && c != ' ' && c != ',') {
+            state = 5;
+        } else if (state == 5 && c == ' ') {
+            state = 6;
+        }
+
+        if (state == 1) {
+            op_str[op_len] = c;
+            ++op_len;
+        } else if (state == 3) {
+            src_str[src_len] = c;
+            ++src_len;
+        } else if (state == 5) {
+            dst_str[dst_len] = c;
+            ++dst_len;
+        }
+    }
+    parse_operand(src_str, &(inst->src), cr);
+    parse_operand(dst_str, &(inst->dst), cr);
+    if (strcmp(op_str, "mov") == 0 || strcmp(op_str, "movq") == 0) {
+        inst->op = INST_MOV;
+    } else if (strcmp(op_str, "push") == 0) {
+        inst->op = INST_PUSH;
+    } else if (strcmp(op_str, "pop") == 0) {
+        inst->op = INST_POP;
+    } else if (strcmp(op_str, "leaveq") == 0) {
+        inst->op = INST_LEAVE;
+    } else if (strcmp(op_str, "callq") == 0) {
+        inst->op = INST_CALL;
+    } else if (strcmp(op_str, "retq") == 0) {
+        inst->op = INST_RET;
+    } else if (strcmp(op_str, "add") == 0) {
+        inst->op = INST_ADD;
+    } else if (strcmp(op_str, "sub") == 0) {
+        inst->op = INST_SUB;
+    } else if (strcmp(op_str, "cmpq") == 0) {
+        inst->op = INST_CMP;
+    } else if (strcmp(op_str, "jne") == 0) {
+        inst->op = INST_JNE;
+    } else if (strcmp(op_str, "jmp") == 0) {
+        inst->op = INST_JMP;
+    }
+
+    debug_printf(DEBUG_PARSEINST, "[%s (%d)] [%s (%d)] [%s (%d)]\n", op_str, inst->op, src_str, inst->src.type, dst_str, inst->dst.type);
 }
 
 static void parse_operand(const char *str, od_t *od, core_t *cr) {
@@ -131,10 +278,111 @@ static void parse_operand(const char *str, od_t *od, core_t *cr) {
         // immediate number
         od->type = IMM;
         od->imm = string2uint_range(str, 1, -1);
+        return;
     } else if (str[0] == '%') {
         // register
+        od->type = REG;
+        od->reg1 = reflect_register(str, cr);
+        return;
     } else {
         // memory
+        char imm[64];
+        int imm_len = 0;
+        char reg1[64];
+        int reg1_len = 0;
+        char reg2[64];
+        int reg2_len = 0;
+        char scal[64];
+        int scal_len = 0;
+        int ca = 0; // 表示括号
+        int cb = 0; // comma ,
+        for (int i = 0; i < str_len; ++i) {
+            char c = str[i];
+            if (c == '(' || c == ')') {
+                ++ca;
+            } else if (c == ',') {
+                ++cb;
+                continue;
+            } else {
+                // parse imm(reg1,reg2,scal) without space
+                if (ca == 0) {
+                    // 立即数
+                    imm[imm_len] = c;
+                    ++imm_len;
+                    continue;
+                } else if (ca == 1) {
+                    if (cb == 0) {
+                        reg1[reg1_len] = c;
+                        ++reg1_len;
+                        continue;
+                    } else if (cb == 1) {
+                        reg2[reg2_len] = c;
+                        reg2_len++;
+                        continue;
+                    } else if (cb == 2) {
+                        scal[scal_len] = c;
+                        ++scal_len;
+                    }
+                }
+            }
+        }
+        if (imm_len > 0) {
+            od->imm = string2uint(imm);
+            if (ca == 0) {
+                od->type = MEM_IMM;
+                return;
+            }
+        }
+
+        if (scal_len > 0) {
+            od->scal = string2uint(scal);
+            if (od->scal != 1 && od->scal != 2 && od->scal != 4 && od->scal != 8) {
+                printf("%s is not a legal scaler\n", scal);
+                exit(0);
+            }
+        }
+
+        if (reg1_len > 0) {
+            od->reg1 = reflect_register(reg1, cr);
+        }
+        if (reg2_len > 0) {
+            od->reg2 = reflect_register(reg2, cr);
+        }
+        if (cb == 0) {
+            if (imm_len > 0) {
+                od->type = MEM_IMM_REG1;
+                return;
+            } else {
+                od->type = MEM_REG1;
+                return;
+            }
+        } else if (cb == 1) {
+            if (imm_len > 0) {
+                od->type = MEM_IMM_REG1_REG2;
+                return;
+            } else {
+                od->type = MEM_REG1_REG2;
+                return;
+            }
+        } else if (cb == 2) {
+            if (reg1_len > 0) {
+                if (imm_len > 0) {
+                    od->type = MEM_IMM_REG1_REG2_SCAL;
+                    return;
+                } else {
+                    od->type = MEM_REG1_REG2_SCAL;
+                    return;
+                }
+            } else {
+                if (imm_len > 0) {
+                    od->type = MEM_IMM_REG2_SCAL;
+                    return;
+                } else {
+                    od->type = MEM_REG2_SCAL;
+                    return;
+                }
+            }
+        }
     }
 }
 
@@ -181,10 +429,7 @@ static handler_t handler_table[NUM_INSTRTYPE] = {
 // reset the condition flags
 // inline to reduce cost
 static inline void reset_cflags(core_t *cr) {
-    cr->CF = 0;
-    cr->ZF = 0;
-    cr->SF = 0;
-    cr->OF = 0;
+    cr->flags._flag_values = 0;
 }
 
 // update the rip pointer to the next instruction sequentially
@@ -275,6 +520,17 @@ static void pop_handler(od_t *src_od, od_t *dst_od, core_t *cr) {
 }
 
 static void leave_handler(od_t *src_od, od_t *dst_od, core_t *cr) {
+    // movq %rbp, %rsp
+    cr->reg.rsp = cr->reg.rbp;
+
+    // popq %rbp
+    uint64_t old_val = read64bits_dram(
+        va2pa((cr->reg).rsp, cr),
+        cr);
+    (cr->reg).rsp = (cr->reg).rsp + 8;
+    (cr->reg).rbp = old_val;
+    next_rip(cr);
+    cr->flags._flag_values = 0;
 }
 
 static void call_handler(od_t *src_od, od_t *dst_od, core_t *cr) {
@@ -318,8 +574,14 @@ static void add_handler(od_t *src_od, od_t *dst_od, core_t *cr) {
         // src: register (value: int64_t bit map)
         // dst: register (value: int64_t bit map)
         uint64_t val = *(uint64_t *)dst + *(uint64_t *)src;
-
+        int val_sign = ((val >> 63) & 0x01);
+        int src_sign = ((val >> 63) & 0x01);
+        int dst_sign = ((val >> 63) & 0x01);
         // set condition flags
+        cr->flags.CF = (val < *(uint64_t *)src); // unsigned
+        cr->flags.ZF = (val == 0);
+        cr->flags.SF = ((val >> 63) & 0x1);
+        cr->flags.OF = ((src_sign == 0 && dst_sign == 0 && val_sign == 1) || (src_sign == 1 && dst_sign == 1 && val_sign == 0));
 
         // update registers
         *(uint64_t *)dst = val;
@@ -331,15 +593,65 @@ static void add_handler(od_t *src_od, od_t *dst_od, core_t *cr) {
 }
 
 static void sub_handler(od_t *src_od, od_t *dst_od, core_t *cr) {
+    uint64_t src = decode_operand(src_od);
+    uint64_t dst = decode_operand(dst_od);
+
+    if (src_od->type == IMM && dst_od->type == REG) {
+        uint64_t val = *(uint64_t *)dst + (~src + 1);
+        int val_sign = ((val >> 63) & 0x1);
+        int src_sign = ((src >> 63) & 0x1);
+        int dst_sign = ((dst >> 63) & 0x1);
+        cr->flags.CF = (val > *(uint64_t *)dst); //
+        cr->flags.ZF = (val == 0);
+        cr->flags.SF = val_sign;
+        cr->flags.OF = ((src_sign == 1 && dst_sign == 0 && val_sign == 1) || (src_sign == 0 && dst_sign == 1 && val_sign == 0)); // 实际上这里是用高位 1 表示是否是负数，即实际表示范围是 int64_t;
+        *(uint64_t *)dst = val;
+        next_rip(cr);
+        return;
+    }
 }
 
 static void cmp_handler(od_t *src_od, od_t *dst_od, core_t *cr) {
+    uint64_t src = decode_operand(src_od);
+    uint64_t dst = decode_operand(dst_od);
+
+    if (src_od->type == IMM && dst_od->type >= MEM_IMM) {
+        uint64_t dst_val = read64bits_dram(va2pa(dst, cr), cr);
+        uint64_t val = dst_val + (~src + 1);
+
+        int val_sign = ((val >> 63) & 0x1);
+        int src_sign = ((src >> 63) & 0x1);
+        int dst_sign = ((dst_val >> 63) & 0x1);
+
+        // condition flags
+        cr->flags.CF = (val > dst_val);
+        cr->flags.ZF = (val == 0);
+        cr->flags.SF = val_sign;
+        cr->flags.OF = ((src_sign == 1 && dst_sign == 0 && val_sign == 1) || (src_sign == 0 && dst_sign == 1 && val_sign == 0));
+    }
 }
 
 static void jne_handler(od_t *src_od, od_t *dst_od, core_t *cr) {
+    uint64_t src = decode_operand(src_od);
+    uint64_t dst = decode_operand(dst_od);
+    // if (src_od->type == IMM) {
+    if (cr->flags.ZF != 1) { // 说明上一个指令的结果不是0，即 ZF 不为 1；
+        // last instruction val != 0
+        cr->rip = src;
+    } else {
+        // last instruction val == 0
+        next_rip(cr);
+    }
+    cr->flags._flag_values = 0;
+    // }
 }
 
 static void jmp_handler(od_t *src_od, od_t *dst_od, core_t *cr) {
+    uint64_t src = decode_operand(src_od);
+    if (cr->flags.ZF == 0) {
+        cr->rip = src;
+    }
+    cr->flags._flag_values = 0;
 }
 
 // instruction cycle is implemented in CPU
@@ -372,7 +684,7 @@ void print_register(core_t *cr) {
            reg.rsi, reg.rdi, reg.rbp, reg.rsp);
     printf("rip = %16lx\n", cr->rip);
     printf("CF = %u\tZF = %u\tSF = %u\tOF = %u\n",
-           cr->CF, cr->ZF, cr->SF, cr->OF);
+           cr->flags.CF, cr->flags.ZF, cr->flags.SF, cr->flags.OF);
 }
 
 void print_stack(core_t *cr) {
@@ -395,4 +707,89 @@ void print_stack(core_t *cr) {
         printf("\n");
         va -= 8;
     }
+}
+
+static uint64_t reflect_register(const char *str, core_t *cr) {
+    reg_t *reg = &(cr->reg);
+    uint64_t reg_addr[72] = {
+        (uint64_t) & (reg->rax),
+        (uint64_t) & (reg->eax),
+        (uint64_t) & (reg->ax),
+        (uint64_t) & (reg->ah),
+        (uint64_t) & (reg->al),
+        (uint64_t) & (reg->rbx),
+        (uint64_t) & (reg->ebx),
+        (uint64_t) & (reg->bx),
+        (uint64_t) & (reg->bh),
+        (uint64_t) & (reg->bl),
+        (uint64_t) & (reg->rcx),
+        (uint64_t) & (reg->ecx),
+        (uint64_t) & (reg->cx),
+        (uint64_t) & (reg->ch),
+        (uint64_t) & (reg->cl),
+        (uint64_t) & (reg->rdx),
+        (uint64_t) & (reg->edx),
+        (uint64_t) & (reg->dx),
+        (uint64_t) & (reg->dh),
+        (uint64_t) & (reg->dl),
+        (uint64_t) & (reg->rsi),
+        (uint64_t) & (reg->esi),
+        (uint64_t) & (reg->si),
+        (uint64_t) & (reg->sih),
+        (uint64_t) & (reg->sil),
+        (uint64_t) & (reg->rdi),
+        (uint64_t) & (reg->edi),
+        (uint64_t) & (reg->di),
+        (uint64_t) & (reg->dih),
+        (uint64_t) & (reg->dil),
+        (uint64_t) & (reg->rbp),
+        (uint64_t) & (reg->ebp),
+        (uint64_t) & (reg->bp),
+        (uint64_t) & (reg->bph),
+        (uint64_t) & (reg->bpl),
+        (uint64_t) & (reg->rsp),
+        (uint64_t) & (reg->esp),
+        (uint64_t) & (reg->sp),
+        (uint64_t) & (reg->sph),
+        (uint64_t) & (reg->spl),
+        (uint64_t) & (reg->r8),
+        (uint64_t) & (reg->r8d),
+        (uint64_t) & (reg->r8w),
+        (uint64_t) & (reg->r8b),
+        (uint64_t) & (reg->r9),
+        (uint64_t) & (reg->r9d),
+        (uint64_t) & (reg->r9w),
+        (uint64_t) & (reg->r9b),
+        (uint64_t) & (reg->r10),
+        (uint64_t) & (reg->r10d),
+        (uint64_t) & (reg->r10w),
+        (uint64_t) & (reg->r10b),
+        (uint64_t) & (reg->r11),
+        (uint64_t) & (reg->r11d),
+        (uint64_t) & (reg->r11w),
+        (uint64_t) & (reg->r11b),
+        (uint64_t) & (reg->r12),
+        (uint64_t) & (reg->r12d),
+        (uint64_t) & (reg->r12w),
+        (uint64_t) & (reg->r12b),
+        (uint64_t) & (reg->r13),
+        (uint64_t) & (reg->r13d),
+        (uint64_t) & (reg->r13w),
+        (uint64_t) & (reg->r13b),
+        (uint64_t) & (reg->r14),
+        (uint64_t) & (reg->r14d),
+        (uint64_t) & (reg->r14w),
+        (uint64_t) & (reg->r14b),
+        (uint64_t) & (reg->r15),
+        (uint64_t) & (reg->r15d),
+        (uint64_t) & (reg->r15w),
+        (uint64_t) & (reg->r15b),
+    };
+    for (int i = 0; i < 72; ++i) {
+        if (strcmp(str, reg_name_list[i]) == 0) {
+            return reg_addr[i];
+        }
+    }
+    printf("parse register %s error\n", str);
+    exit(0);
 }
